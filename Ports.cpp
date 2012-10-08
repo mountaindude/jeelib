@@ -431,6 +431,10 @@ void MemoryStream::reset () {
 #define FCR     (2 << 3)
 #define LCR     (3 << 3)
 #define RXLVL   (9 << 3)
+//GSA
+#define EFCR    (15 << 3)
+#define EFR     (2 << 3)
+
 
 /** Set a UartPlug register.
  *  @param reg The register to set.
@@ -461,6 +465,10 @@ void UartPlug::begin (long baud) {
     regSet(DLH, divisor >> 8);  // high byte
     regSet(LCR, 0x03);          // 8 bits, no parity
     regSet(FCR, 0x07);          // fifo enable (and flush)
+    // GSA
+//    regSet(LCR, 0xbf);
+//    regSet(EFR, 0x40);
+    regSet(EFCR, 0x30);         // Enable auto RS-485 RTS control
     dev.stop();
 }
 
