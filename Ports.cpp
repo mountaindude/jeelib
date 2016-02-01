@@ -125,7 +125,7 @@ void Port::shiftWrite(uint8_t bitOrder, uint16_t value, uint8_t count) const {
     }
 }
 
-RemoteNode::RemoteNode (char id, uint8_t band, uint8_t group) 
+RemoteNode::RemoteNode (char id, uint8_t band, uint8_t group)
     : nid (id & 0x1F)
 {
     memset(&data, 0, sizeof data);
@@ -159,17 +159,17 @@ void RemotePort::anaWrite(uint8_t val) const {
     } else
         digiWrite2(val >= 128);
 }
-   
+
 void RemotePort::mode2(uint8_t value) const {
     node.data.flags |= MODE_CHANGE;
     bitWrite(node.data.modes, pinBit2(), value);
 }
-   
+
 uint16_t RemotePort::anaRead() const {
     bitSet(node.data.flags, pinBit());
     return node.data.anaIn[pinBit()];
 }
-   
+
 uint8_t RemotePort::digiRead2() const {
     return bitRead(node.data.digiIO, pinBit2());
 }
@@ -431,10 +431,12 @@ void MemoryStream::reset () {
 #define FCR     (2 << 3)
 #define LCR     (3 << 3)
 #define RXLVL   (9 << 3)
-//GSA
+
+// Support for using UART plug with half duplex RS485 converters
+#ifdef UARTPLUG_RS485_RTS
 #define EFCR    (15 << 3)
 #define EFR     (2 << 3)
-
+#endif
 
 /** Set a UartPlug register.
  *  @param reg The register to set.
@@ -447,7 +449,7 @@ void UartPlug::regSet (byte reg, byte value) {
 }
 
 /** Read a UartPlug register.
- *  @return reg The contents of the register read. 
+ *  @return reg The contents of the register read.
  */
 void UartPlug::regRead (byte reg) {
   dev.send();
@@ -465,9 +467,12 @@ void UartPlug::begin (long baud) {
     regSet(DLH, divisor >> 8);  // high byte
     regSet(LCR, 0x03);          // 8 bits, no parity
     regSet(FCR, 0x07);          // fifo enable (and flush)
-    // GSA
+
+    // Support for using UART plug with half duplex RS485 converters
+//    #ifdef UARTPLUG_RS485_RTS
 //    regSet(LCR, 0xbf);
 //    regSet(EFR, 0x40);
+//    #endif
     regSet(EFCR, 0x30);         // Enable auto RS-485 RTS control
     dev.stop();
 }
@@ -492,7 +497,7 @@ byte UartPlug::available () {
 }
 
 /** Read two bytes from the UartPlug's serial input.
- *  @return Two bytes with the data read. 
+ *  @return Two bytes with the data read.
  */
 int UartPlug::read () {
     return available() ? rxbuf[out++] : -1;
@@ -577,9 +582,9 @@ const word* LuxPlug::getData() {
     return data.w;
 }
 
-#define LUX_SCALE	14	// scale by 2^14 
+#define LUX_SCALE	14	// scale by 2^14
 #define RATIO_SCALE 9	// scale ratio by 2^9
-#define CH_SCALE    10	// scale channel values by 2^10 
+#define CH_SCALE    10	// scale channel values by 2^10
 
 /** Calculate Lux value from the raw data retreived.
  *  @param iGain	gain, where 0:1X, 1:16X.
@@ -588,27 +593,27 @@ const word* LuxPlug::getData() {
  */
 word LuxPlug::calcLux(byte iGain, byte tInt) const
 {
-    unsigned long chScale; 
+    unsigned long chScale;
     switch (tInt) {
-        case 0:  chScale = 0x7517; break; 
-        case 1:  chScale = 0x0fe7; break; 
+        case 0:  chScale = 0x7517; break;
+        case 1:  chScale = 0x0fe7; break;
         default: chScale = (1 << CH_SCALE); break;
     }
     if (!iGain)
         chScale <<= 4;
-    unsigned long channel0 = (data.w[0] * chScale) >> CH_SCALE; 
-    unsigned long channel1 = (data.w[1] * chScale) >> CH_SCALE; 
+    unsigned long channel0 = (data.w[0] * chScale) >> CH_SCALE;
+    unsigned long channel1 = (data.w[1] * chScale) >> CH_SCALE;
 
-    unsigned long ratio1 = 0; 
+    unsigned long ratio1 = 0;
     if (channel0 != 0)
         ratio1 = (channel1 << (RATIO_SCALE+1)) / channel0;
     unsigned long ratio = (ratio1 + 1) >> 1;
 
     word b, m;
-         if (ratio <= 0x0040) { b = 0x01F2; m = 0x01BE; } 
-    else if (ratio <= 0x0080) { b = 0x0214; m = 0x02D1; } 
-    else if (ratio <= 0x00C0) { b = 0x023F; m = 0x037B; } 
-    else if (ratio <= 0x0100) { b = 0x0270; m = 0x03FE; } 
+         if (ratio <= 0x0040) { b = 0x01F2; m = 0x01BE; }
+    else if (ratio <= 0x0080) { b = 0x0214; m = 0x02D1; }
+    else if (ratio <= 0x00C0) { b = 0x023F; m = 0x037B; }
+    else if (ratio <= 0x0100) { b = 0x0270; m = 0x03FE; }
     else if (ratio <= 0x0138) { b = 0x016F; m = 0x01FC; }
     else if (ratio <= 0x019A) { b = 0x00D2; m = 0x00FB; }
     else if (ratio <= 0x029A) { b = 0x0018; m = 0x0012; }
@@ -668,7 +673,7 @@ void InputPlug::select(uint8_t channel) {
     delayMicroseconds(slow ? 400 : 50);
     byte data = 0x10 | (channel & 0x0F);
     byte mask = 1 << (portNum + 3); // digitalWrite is too slow
-    
+
     ATOMIC_BLOCK(ATOMIC_FORCEON) {
         for (byte i = 0; i < 5; ++i) {
             byte us = bitRead(data, 4 - i) ? 9 : 3;
@@ -732,7 +737,7 @@ void HeadingBoard::begin() {
     // prepare ADC
     aux.mode(OUTPUT);
     aux.digiWrite(0);
-    
+
     // generate 32768 Hz on IRQ pin (OC2B)
 #ifdef TCCR2A
     TCCR2A = bit(COM2B0) | bit(WGM21);
@@ -742,7 +747,7 @@ void HeadingBoard::begin() {
     //XXX TINY!
 #endif
     aux.mode3(OUTPUT);
-    
+
     getConstants();
 }
 
@@ -750,13 +755,13 @@ void HeadingBoard::pressure(int& temp, int& pres) const {
     word D2 = adcValue(0);
     // Serial.print("D2 = ");
     // Serial.println(D2);
-    int corr = (D2 - C5) >> 7;        
+    int corr = (D2 - C5) >> 7;
     // Serial.print("corr = ");
     // Serial.println(corr);
     int dUT = (D2 - C5) - (corr * (long) corr * (D2 >= C5 ? A : B) >> C);
     // Serial.print("dUT = ");
     // Serial.println(dUT);
-    temp = 250 + ((long) dUT * C6 >> 16) - (dUT >> D); 
+    temp = 250 + ((long) dUT * C6 >> 16) - (dUT >> D);
 
     word D1 = adcValue(1);
     // Serial.print("D1 = ");
@@ -804,7 +809,7 @@ int CompassBoard::read2 (byte last) {
 }
 
 float CompassBoard::heading () {
-    send();     
+    send();
     write(0x01); // Configuration Register B
     write(0x40); // Reg B: +/- 1.9 Ga
     stop();
@@ -817,7 +822,7 @@ float CompassBoard::heading () {
     /* int z = */ read2(0);
     int y = read2(1);
     stop();
-    
+
     return degrees(atan2(y, x));
 }
 
@@ -827,7 +832,7 @@ InfraredPlug::InfraredPlug (uint8_t num)
     digiWrite(0);
     mode(OUTPUT);
     mode2(INPUT);
-    digiWrite2(1); // pull-up        
+    digiWrite2(1); // pull-up
 }
 
 void InfraredPlug::configure(uint8_t slot4, uint8_t gap256) {
@@ -903,7 +908,7 @@ uint8_t InfraredPlug::decoder(uint8_t nibbles) {
     }
     return UNKNOWN;
 }
-    
+
 void InfraredPlug::send(const uint8_t* data, uint16_t bits) {
     // TODO: switch to an interrupt-driven design
     for (byte i = 0; i < bits; ++i) {
@@ -948,7 +953,7 @@ void AnalogPlug::begin (byte mode) {
 void AnalogPlug::select (byte channel) {
   send();
   write(0x80 | ((channel - 1) << 5) | (config & 0x1F));
-  stop();    
+  stop();
 }
 
 long AnalogPlug::reading () {
@@ -966,20 +971,20 @@ void HYT131::reading (int& temp, int& humi, byte (*delayFun)(word ms)) {
     // Start measurement
     send();
     stop();
-    
+
     // Wait for completion (using user-supplied (low-power?) delay function)
     if (delayFun)
         delayFun(100);
     else
         delay(100);
-    
+
     // Extract readings
     receive();
     uint16_t h = (read(0) & 0x3F) << 8;
     h |= read(0);
     uint16_t t = read(0) << 6;
     t |= read(1) >> 2;
-    
+
     // convert 0..16383 to 0..100% (*10)
     humi = (h * 1000L >> 14);
     // convert 0..16383 to -40 .. 125 (*10)
@@ -995,13 +1000,13 @@ bool DHTxx::reading (int& temp, int &humi, bool precise) {
   delay(10); // wait for any previous transmission to end
   digitalWrite(pin, LOW);
   delay(18);
-  
+
   cli();
-  
+
   digitalWrite(pin, HIGH);
   delayMicroseconds(30);
   pinMode(pin, INPUT);
-  
+
   byte data[6]; // holds a few start bits and then the 5 real payload bytes
 #if DEBUG_DHT
   static byte times[48];
@@ -1019,7 +1024,7 @@ bool DHTxx::reading (int& temp, int &humi, bool precise) {
 #if DEBUG_DHT
     times[i] = timer;
 #endif
-    // if no transition was seen, return 
+    // if no transition was seen, return
     if (timer >= 250) {
       sei();
       return false;
@@ -1029,7 +1034,7 @@ bool DHTxx::reading (int& temp, int &humi, bool precise) {
     data[offset] <<= 1;
     data[offset] |= timer > 7;
   }
-  
+
   sei();
 
 #if DEBUG_DHT
@@ -1049,11 +1054,11 @@ bool DHTxx::reading (int& temp, int &humi, bool precise) {
   Serial.print(s, HEX);
   Serial.println();
 #endif
-  
+
   byte sum = data[1] + data[2] + data[3] + data[4];
   if (sum != data[5])
     return false;
-  
+
   humi = precise ? (data[1] << 8) | data[2] : 10 * data[1];
 
   word t = precise ? ((data[3] & 0x7F) << 8) | data[4] : 10 * data[3];
@@ -1091,13 +1096,13 @@ const word* ColorPlug::chromaCCT () {
     long X = -14282L * data.w[0] + 154924L * data.w[1] - 95641L * data.w[2];
     long Y = -32466L * data.w[0] + 157837L * data.w[1] - 73191L * data.w[2];
     long Z = -68202L * data.w[0] +  77073L * data.w[1] + 56332L * data.w[2];
-    if (X > 0 && Y > 0 && Z > 0) { // chromaticity valid 
+    if (X > 0 && Y > 0 && Z > 0) { // chromaticity valid
       // it'd be nice if we could get rid of these floating point calculations
       // but X, Y, or Z may have up to 28 bits, so we'd need to drop precision
       chromacct[0] = (X * 1000.0) / (X + Y + Z);
       chromacct[1] = (Y * 1000.0) / (X + Y + Z);
       double n = (chromacct[0] - 332.0) / (185.8 - chromacct[1]);
-      chromacct[2] = 449 * n * n * n + 3525 * n * n + 6823.3 * n + 5520.33;      
+      chromacct[2] = 449 * n * n * n + 3525 * n * n + 6823.3 * n + 5520.33;
       if (chromacct[2] > 10000) // improbable value for color temperature
         chromacct[2] = 0;
     }
@@ -1350,7 +1355,7 @@ void InputParser::poll() {
         reset();
         return;
     }
-    
+
     for (Commands* p = cmds; ; ++p) {
         char code = pgm_read_byte(&p->code);
         if (code == 0)
@@ -1369,7 +1374,7 @@ void InputParser::poll() {
             return;
         }
     }
-        
+
     io.print("Known commands:");
     for (Commands* p = cmds; ; ++p) {
         char code = pgm_read_byte(&p->code);
