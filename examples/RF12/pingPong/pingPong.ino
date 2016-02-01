@@ -3,7 +3,7 @@
 // 2010-05-17 <jc@wippler.nl> http://opensource.org/licenses/mit-license.php
 
 // with thanks to Peter G for creating a test sketch and pointing out the issue
-// see http://news.jeelabs.org/2010/05/20/a-subtle-rf12-detail/
+// see http://jeelabs.org/2010/05/20/a-subtle-rf12-detail/
 
 #include <JeeLib.h>
 
@@ -34,7 +34,7 @@ void loop () {
         receiveLed(1);
         Serial.print("OK ");
         for (byte i = 0; i < rf12_len; ++i)
-            Serial.print(rf12_data[i]);
+            Serial.print((char) rf12_data[i]);
         Serial.println();
         delay(100); // otherwise led blinking isn't visible
         receiveLed(0);

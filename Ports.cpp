@@ -353,7 +353,7 @@ byte BlinkPlug::buttonCheck () {
     return lastState == 3 ? ALL_ON : lastState ? SOME_ON : ALL_OFF;
 }
 
-void MemoryPlug::load (word page, void* buf, byte offset, int count) {
+void MemoryPlug::load (word page, byte offset, void* buf, int count) {
     // also don't load right after a save, see http://forum.jeelabs.net/node/469
     while (millis() < nextSave)
         ;
@@ -369,7 +369,7 @@ void MemoryPlug::load (word page, void* buf, byte offset, int count) {
     stop();
 }
 
-void MemoryPlug::save (word page, const void* buf, byte offset, int count) {
+void MemoryPlug::save (word page, byte offset, const void* buf, int count) {
     // don't do back-to-back saves, last one must have had time to finish!
     while (millis() < nextSave)
         ;
@@ -383,7 +383,7 @@ void MemoryPlug::save (word page, const void* buf, byte offset, int count) {
         write(*p++);
     stop();
 
-    nextSave = millis() + 6;
+    nextSave = millis() + 10;
     // delay(5);
 }
 
@@ -396,7 +396,7 @@ long MemoryStream::position (byte writing) const {
 
 byte MemoryStream::get () {
     if (pos == 0) {
-        dev.load(curr, buffer);
+        dev.load(curr, 0, buffer, sizeof buffer);
         curr += step;
     }
     return buffer[pos++];
@@ -405,7 +405,7 @@ byte MemoryStream::get () {
 void MemoryStream::put (byte data) {
     buffer[pos++] = data;
     if (pos == 0) {
-        dev.save(curr, buffer);
+        dev.save(curr, 0, buffer, sizeof buffer);
         curr += step;
     }
 }
@@ -413,7 +413,7 @@ void MemoryStream::put (byte data) {
 word MemoryStream::flush () {
     if (pos != 0) {
         memset(buffer + pos, 0xFF, 256 - pos);
-        dev.save(curr, buffer);
+      dev.save(curr, 0, buffer, sizeof buffer);
     }
     return curr;
 }
@@ -647,6 +647,15 @@ const int* GravityPlug::getAxes() {
     for (byte i = 0; i < 3; ++i)
         data.w[i] = (data.w[i] ^ 0x200) - 0x200; // sign extends bit 9
     return data.w;
+}
+
+char GravityPlug::temperature() {
+    send();
+    write(0x08);
+    receive();
+    char temp = read(1) - 60;
+    stop();
+    return temp;
 }
 
 /** Select the channel on the multiplexer.
@@ -953,11 +962,35 @@ long AnalogPlug::reading () {
   return raw;
 }
 
+void HYT131::reading (int& temp, int& humi, byte (*delayFun)(word ms)) {
+    // Start measurement
+    send();
+    stop();
+    
+    // Wait for completion (using user-supplied (low-power?) delay function)
+    if (delayFun)
+        delayFun(100);
+    else
+        delay(100);
+    
+    // Extract readings
+    receive();
+    uint16_t h = (read(0) & 0x3F) << 8;
+    h |= read(0);
+    uint16_t t = read(0) << 6;
+    t |= read(1) >> 2;
+    
+    // convert 0..16383 to 0..100% (*10)
+    humi = (h * 1000L >> 14);
+    // convert 0..16383 to -40 .. 125 (*10)
+    temp = (t * 1650L >> 14) - 400;
+}
+
 DHTxx::DHTxx (byte pinNum) : pin (pinNum) {
   digitalWrite(pin, HIGH);
 }
 
-bool DHTxx::reading (int& temp, int &humi) {
+bool DHTxx::reading (int& temp, int &humi, bool precise) {
   pinMode(pin, OUTPUT);
   delay(10); // wait for any previous transmission to end
   digitalWrite(pin, LOW);
@@ -1021,32 +1054,74 @@ bool DHTxx::reading (int& temp, int &humi) {
   if (sum != data[5])
     return false;
   
-  word h = (data[1] << 8) | data[2];
-  humi = ((h >> 3) * 5) >> 4;     // careful with overflow
+  humi = precise ? (data[1] << 8) | data[2] : 10 * data[1];
 
-  int tmul = data[3] & 0x80 ? -5 : 5;
-  word t = ((data[3] & 0x7F) << 8) | data[4];
-  temp = ((t >> 3) * tmul) >> 4;  // careful with overflow
+  word t = precise ? ((data[3] & 0x7F) << 8) | data[4] : 10 * data[3];
+  temp = data[3] & 0x80 ? - t : t;
 
   return true;
+}
+
+void ColorPlug::setGain (byte gain, byte prescaler) {
+    send();
+    write(0x80 | GAIN); // write to Gain regiser
+    write((gain << 4) | prescaler);
+    stop();
+}
+
+const word* ColorPlug::getData () {
+    send();
+    write(0x80 | BLOCKREAD); // write to Blockread register
+    receive();
+    read(0); //read SMBus size (always 8)
+    data.b[2] = read(0); // green low
+    data.b[3] = read(0); // green high
+    data.b[0] = read(0); // red low
+    data.b[1] = read(0); // red high
+    data.b[4] = read(0); // blue low
+    data.b[5] = read(0); // blue high
+    data.b[6] = read(0); // clear low
+    data.b[7] = read(1); // clear high
+    stop();
+    return data.w;
+}
+
+const word* ColorPlug::chromaCCT () {
+    chromacct[0] = chromacct[1] = chromacct[2] = 0;
+    long X = -14282L * data.w[0] + 154924L * data.w[1] - 95641L * data.w[2];
+    long Y = -32466L * data.w[0] + 157837L * data.w[1] - 73191L * data.w[2];
+    long Z = -68202L * data.w[0] +  77073L * data.w[1] + 56332L * data.w[2];
+    if (X > 0 && Y > 0 && Z > 0) { // chromaticity valid 
+      // it'd be nice if we could get rid of these floating point calculations
+      // but X, Y, or Z may have up to 28 bits, so we'd need to drop precision
+      chromacct[0] = (X * 1000.0) / (X + Y + Z);
+      chromacct[1] = (Y * 1000.0) / (X + Y + Z);
+      double n = (chromacct[0] - 332.0) / (185.8 - chromacct[1]);
+      chromacct[2] = 449 * n * n * n + 3525 * n * n + 6823.3 * n + 5520.33;      
+      if (chromacct[2] > 10000) // improbable value for color temperature
+        chromacct[2] = 0;
+    }
+    return chromacct;
 }
 
 // ISR(WDT_vect) { Sleepy::watchdogEvent(); }
 
 static volatile byte watchdogCounter;
+static byte backupMode = 0;
 
 void Sleepy::watchdogInterrupts (char mode) {
+#ifndef WDTCSR
+#define WDTCSR WDTCR
+#endif
     // correct for the fact that WDP3 is *not* in bit position 3!
     if (mode & bit(3))
         mode ^= bit(3) | bit(WDP3);
     // pre-calculate the WDTCSR value, can't do it inside the timed sequence
     // we only generate interrupts, no reset
-    byte wdtcsr = mode >= 0 ? bit(WDIE) | mode : 0;
+    byte wdtcsr = mode >= 0 ? bit(WDIE) | mode : backupMode;
+    if(mode>=0) backupMode = WDTCSR;
     MCUSR &= ~(1<<WDRF);
     ATOMIC_BLOCK(ATOMIC_FORCEON) {
-#ifndef WDTCSR
-#define WDTCSR WDTCR
-#endif
         WDTCSR |= (1<<WDCE) | (1<<WDE); // timed sequence
         WDTCSR = wdtcsr;
     }
@@ -1139,6 +1214,10 @@ char Scheduler::poll() {
                     tasks[i] -= lowest;
                 }
             }
+        } else {
+            // must turn off timer or it might overflow if its poll-method
+            // is not called within 5535 ms, i.e. if no tasks are scheduled
+            ms100.set(0);
         }
         remaining = lowest;
     } else if (remaining == ~0U) //remaining == ~0 means nothing running
